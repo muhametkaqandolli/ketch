@@ -1,12 +1,15 @@
 package chart
 
 import (
+	"errors"
+	"log"
+	"os"
+
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"log"
-	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -73,7 +76,7 @@ func (c HelmClient) UpdateChart(tv TemplateValuer, config ChartConfig, opts ...I
 	getValuesClient := action.NewGetValues(c.cfg)
 	getValuesClient.AllValues = true
 	_, err = getValuesClient.Run(appName)
-	if err != nil && err.Error() == "release: not found" {
+	if err != nil && errors.Is(err, driver.ErrReleaseNotFound) {
 		clientInstall := action.NewInstall(c.cfg)
 		clientInstall.ReleaseName = appName
 		clientInstall.Namespace = c.namespace
@@ -91,6 +94,9 @@ func (c HelmClient) UpdateChart(tv TemplateValuer, config ChartConfig, opts ...I
 	}
 	updateClient := action.NewUpgrade(c.cfg)
 	updateClient.Namespace = c.namespace
+	// MaxHistory means how many k8s secrets with releases we keep on a cluster per app,
+	// let's set it to ten, so it is possible to manually rollback an app.
+	updateClient.MaxHistory = 10
 	updateClient.PostRenderer = &postRender{
 		namespace: c.namespace,
 		cli:       c.c,
@@ -102,7 +108,7 @@ func (c HelmClient) UpdateChart(tv TemplateValuer, config ChartConfig, opts ...I
 func (c HelmClient) DeleteChart(appName string) error {
 	uninstall := action.NewUninstall(c.cfg)
 	_, err := uninstall.Run(appName)
-	if err != nil && err.Error() == "release: not found" {
+	if err != nil && errors.Is(err, driver.ErrReleaseNotFound) {
 		return nil
 	}
 	return err
